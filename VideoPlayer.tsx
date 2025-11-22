@@ -23,14 +23,14 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
 
-  // Helper to find best supported mime type, prioritizing MP4
+  // Helper: Kiểm tra trình duyệt hỗ trợ định dạng nào, ưu tiên MP4 (H.264)
   const getSupportedMimeType = () => {
     const types = [
-      'video/mp4;codecs=avc1.4d401e,mp4a.40.2', // Standard MP4 H.264
+      'video/mp4;codecs=avc1.4d401e,mp4a.40.2', // Chuẩn MP4 H.264 (Tốt nhất cho Mobile/Windows)
       'video/mp4;codecs=avc1',
       'video/mp4;codecs=h264',
       'video/mp4',
-      'video/webm;codecs=h264', // WebM container but H.264 codec
+      'video/webm;codecs=h264', // WebM nhưng dùng codec H.264
       'video/webm;codecs=vp9',
       'video/webm'
     ];
@@ -49,7 +49,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       
       if (!ctx) return;
 
-      // Determine Mime Type
+      // 1. Xác định định dạng file
       const mimeType = getSupportedMimeType();
       if (!mimeType) {
         alert('Trình duyệt của bạn không hỗ trợ ghi video. Vui lòng thử Chrome hoặc Edge mới nhất.');
@@ -57,16 +57,16 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         return;
       }
 
-      const isMp4 = mimeType.includes('mp4');
-      console.log(`Exporting using MIME type: ${mimeType}`);
+      // Kiểm tra xem có phải là mp4 không để đặt đuôi file
+      const isMp4 = mimeType.toLowerCase().includes('mp4');
+      console.log(`Đang xuất video với định dạng: ${mimeType}`);
 
-      // Setup Recording
+      // 2. Cấu hình Recorder
       const stream = canvas.captureStream(30); // 30 FPS
       
-      // Increase bitrate for better quality (5 Mbps)
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: mimeType,
-        videoBitsPerSecond: 5000000 
+        videoBitsPerSecond: 5000000 // 5 Mbps cho chất lượng cao
       });
       
       const chunks: Blob[] = [];
@@ -80,33 +80,34 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         const a = document.createElement('a');
         a.href = url;
         
-        // Set correct extension
+        // 3. Đặt tên file theo định dạng
         const extension = isMp4 ? 'mp4' : 'webm';
-        a.download = `verticalize_export_${Date.now()}.${extension}`;
+        a.download = `verticalize_video_${Date.now()}.${extension}`;
         
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
         
-        // Reset UI
+        // Reset trạng thái UI
         video.loop = true;
         video.muted = false;
         setIsPlaying(false);
         onExportComplete();
       };
 
-      // Start Process
+      // 4. Bắt đầu quá trình ghi
       video.pause();
       video.currentTime = 0;
-      video.loop = false; // Play once for recording
-      video.muted = true; // Avoid audio feedback
+      video.loop = false; // Chạy 1 lần để ghi
+      video.muted = true; // Tắt tiếng loa ngoài để tránh feedback (nếu có mic), nhưng stream vẫn có thể xử lý audio nếu cần setup thêm
       
-      // Small delay to ensure seek is complete
+      // Delay nhỏ để đảm bảo seek hoàn tất
       await new Promise(r => setTimeout(r, 200));
       
       mediaRecorder.start();
 
+      // Hàm vẽ frame liên tục
       const drawFrame = () => {
         if (video.paused || video.ended) {
           if (video.ended) {
@@ -115,25 +116,22 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
           }
         }
 
-        // Draw Video with Pan Crop
-        // Canvas size is set to 1080x1920 (9:16) in the hidden element
+        // Vẽ Video với Crop và Pan
+        // Canvas size được set cứng là 1080x1920 (9:16)
         const vWidth = video.videoWidth;
         const vHeight = video.videoHeight;
         
-        // Calculate source aspect ratio and crop
-        // We want to fill height, so we scale based on height
+        // Tính toán tỷ lệ crop để lấp đầy chiều cao (cover)
         const scale = canvas.height / vHeight;
         const scaledWidth = vWidth * scale;
         
-        // Calculate X offset based on PanX (-50 to 50)
-        // Center point is (scaledWidth - canvas.width) / 2
-        // Pan modifier moves this center point
+        // Tính toán Pan X
         const centerOffset = (scaledWidth - canvas.width) / 2;
-        const panOffset = (panX / 50) * centerOffset; // Map -50..50 to pixel offset
+        const panOffset = (panX / 50) * centerOffset; 
         
         let sourceX = (centerOffset + panOffset) / scale;
         
-        // Clamp sourceX
+        // Giới hạn không cho pan ra ngoài khung hình
         sourceX = Math.max(0, Math.min(sourceX, vWidth - (canvas.width / scale)));
 
         ctx.drawImage(
@@ -142,14 +140,13 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
           0, 0, canvas.width, canvas.height // Dest
         );
 
-        // Draw Overlays if visible
+        // Vẽ Overlay (Text) lên Canvas
         if (overlayConfig.isVisible && overlayConfig.text) {
            drawOverlayOnCanvas(ctx, canvas.width, canvas.height);
         }
 
-        // Report Progress
+        // Cập nhật thanh tiến trình
         const percent = Math.round((video.currentTime / video.duration) * 100);
-        // Ensure we don't go over 100 visually until done
         onProgress(Math.min(percent, 99));
 
         if (!video.ended) {
@@ -161,13 +158,14 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         await video.play();
         drawFrame();
       } catch (err) {
-        console.error("Error playing video for export:", err);
+        console.error("Lỗi khi phát video để export:", err);
         mediaRecorder.stop();
         onExportComplete();
       }
     }
   }));
 
+  // Hàm vẽ Text Overlay lên Canvas (mô phỏng CSS style)
   const drawOverlayOnCanvas = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     const yPos = (overlayConfig.positionY / 100) * height;
     const text = overlayConfig.text;
@@ -175,23 +173,23 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
 
     ctx.save();
     
-    // Common Text Settings
+    // Cấu hình chung
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     if (overlayConfig.style === OverlayStyle.Neon) {
-      // Neon Style
+      // Style Neon
       ctx.font = 'italic small-caps 900 80px "Inter", sans-serif';
       ctx.shadowColor = '#22d3ee'; // Cyan glow
       ctx.shadowBlur = 30;
       ctx.fillStyle = 'white';
       
-      // Draw multiple times for intense glow
+      // Vẽ nhiều lần để tạo hiệu ứng glow mạnh
       ctx.fillText(text, centerX, yPos);
       ctx.fillStyle = '#e879f9'; // Purple tint
       ctx.fillText(text, centerX, yPos);
       
-      // Gradient fill simulation (simple)
+      // Giả lập gradient text
       const gradient = ctx.createLinearGradient(centerX - 200, yPos, centerX + 200, yPos);
       gradient.addColorStop(0, '#22d3ee');
       gradient.addColorStop(1, '#a855f7');
@@ -200,23 +198,23 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       ctx.fillText(text, centerX, yPos);
 
     } else if (overlayConfig.style === OverlayStyle.Comment) {
-      // Comment Style (Bubble)
+      // Style Bình luận mạng xã hội
       ctx.font = '500 40px "Inter", sans-serif';
       const metrics = ctx.measureText(text);
       const boxWidth = Math.min(width * 0.85, metrics.width + 120);
-      const boxHeight = 140; // Approx
+      const boxHeight = 140; 
       const boxX = centerX - boxWidth / 2;
       const boxY = yPos - boxHeight / 2;
 
-      // Draw Bubble Background
+      // Bong bóng chat
       ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
       ctx.shadowColor = 'rgba(0,0,0,0.2)';
       ctx.shadowBlur = 20;
       ctx.roundRect(boxX, boxY, boxWidth, boxHeight, 20);
       ctx.fill();
-      ctx.shadowBlur = 0; // Reset shadow
+      ctx.shadowBlur = 0;
 
-      // Avatar Circle
+      // Avatar
       const avatarX = boxX + 40;
       const avatarY = boxY + 40;
       const gradient = ctx.createLinearGradient(avatarX, avatarY, avatarX + 40, avatarY + 40);
@@ -237,13 +235,13 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       ctx.font = 'bold 24px sans-serif';
       ctx.fillText("@nguoisangtao_gemini", avatarX + 50, avatarY + 15);
       
-      // Content
+      // Nội dung text
       ctx.fillStyle = '#0f172a';
       ctx.font = '500 36px "Inter", sans-serif';
       ctx.fillText(text, avatarX + 50, avatarY + 50, boxWidth - 80);
 
     } else if (overlayConfig.style === OverlayStyle.Minimal) {
-      // Minimal Style
+      // Style Tối giản
       ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
       ctx.roundRect(centerX - width * 0.45, yPos - 60, width * 0.9, 120, 10);
       ctx.fill();
@@ -259,7 +257,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
       ctx.fillText(`"${text}"`, centerX, yPos + 20);
 
     } else {
-      // Classic Style
+      // Style Cổ điển (Classic)
       ctx.font = 'bold 50px "Inter", sans-serif';
       const metrics = ctx.measureText(text);
       const padding = 30;
@@ -277,7 +275,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
     ctx.restore();
   }
 
-  // --- Standard Render Logic ---
+  // --- Logic Render View ---
 
   useEffect(() => {
     if (videoRef.current) {
@@ -370,7 +368,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
   return (
     <div className="relative w-full h-full bg-black overflow-hidden shadow-2xl rounded-[2rem] border-[8px] border-slate-800 ring-1 ring-slate-700 group">
       
-      {/* Hidden Canvas for Export */}
+      {/* Canvas ẩn để xuất video */}
       <canvas 
         ref={canvasRef} 
         width={1080} 
@@ -378,7 +376,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         className="hidden"
       />
 
-      {/* Video Layer */}
+      {/* Video View Layer */}
       {videoState.url ? (
         <video
           ref={videoRef}
@@ -399,7 +397,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         </div>
       )}
 
-      {/* Overlay Layer */}
+      {/* Overlay HTML Layer (cho preview) */}
       {renderOverlayHTML()}
 
       {/* Social Mockup Interface */}
@@ -429,7 +427,7 @@ export const VideoPlayer = forwardRef<VideoPlayerRef, VideoPlayerProps>(({
         </div>
       </div>
 
-      {/* Play/Pause Overlay */}
+      {/* Play/Pause Button */}
       <div 
         className={`absolute inset-0 flex items-center justify-center bg-black/20 transition-opacity duration-300 ${isPlaying ? 'opacity-0 hover:opacity-100' : 'opacity-100'}`}
         onClick={togglePlay}
