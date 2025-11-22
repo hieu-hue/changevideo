@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { VideoPlayer } from './components/VideoPlayer';
 import { Controls } from './components/Controls';
-import { VideoState, OverlayConfig, OverlayStyle } from './types';
+import { VideoState, OverlayConfig, OverlayStyle, VideoPlayerRef } from './types';
 import { generatePromptFromVideo } from './services/geminiService';
-import { Smartphone, Sparkles } from 'lucide-react';
+import { Smartphone, Sparkles, Download, Crop } from 'lucide-react';
 
 const App: React.FC = () => {
   const [videoState, setVideoState] = useState<VideoState>({
@@ -21,6 +21,11 @@ const App: React.FC = () => {
 
   const [panX, setPanX] = useState<number>(0);
   const [isGenerating, setIsGenerating] = useState(false);
+  
+  // Export States
+  const videoPlayerRef = useRef<VideoPlayerRef>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
 
   const handleFileUpload = useCallback((file: File) => {
     if (videoState.url) {
@@ -34,8 +39,6 @@ const App: React.FC = () => {
     });
     // Reset text on new file
     setOverlayConfig(prev => ({ ...prev, text: "Đang phân tích video..." }));
-    
-    // Auto-trigger generic prompt if API key exists (optional, better to let user click)
   }, [videoState.url]);
 
   const handleGeneratePrompt = async () => {
@@ -62,6 +65,18 @@ const App: React.FC = () => {
     } finally {
       setIsGenerating(false);
     }
+  };
+
+  const handleDownloadClick = async () => {
+    if (videoPlayerRef.current) {
+      await videoPlayerRef.current.exportVideo();
+    }
+  };
+
+  const handleSmartCropClick = () => {
+    setPanX(0); // Simple auto-center for now
+    // In a real app, this would use Object Detection API to find the subject center
+    alert("Đã tự động căn chỉnh vào giữa khung hình (Smart Center).");
   };
 
   return (
@@ -111,23 +126,58 @@ const App: React.FC = () => {
         </div>
 
         {/* Right Column: Live Preview */}
-        <div className="lg:col-span-8 xl:col-span-9 flex items-center justify-center bg-slate-950/50 rounded-2xl border border-slate-800/50 relative overflow-hidden">
+        <div className="lg:col-span-8 xl:col-span-9 flex flex-col items-center justify-center bg-slate-950/50 rounded-2xl border border-slate-800/50 relative overflow-hidden gap-6">
           {/* Background Grid Pattern */}
           <div className="absolute inset-0 opacity-10" style={{ backgroundImage: 'radial-gradient(#475569 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
           
           {/* Phone Frame */}
-          <div className="relative z-10 h-[85vh] aspect-[9/16] max-h-[800px] shadow-2xl rounded-[2.5rem]">
+          <div className="relative z-10 h-[75vh] aspect-[9/16] max-h-[700px] shadow-2xl rounded-[2.5rem]">
              <VideoPlayer 
+                ref={videoPlayerRef}
                 videoState={videoState} 
                 overlayConfig={overlayConfig}
                 panX={panX}
+                onExportStart={() => { setIsExporting(true); setExportProgress(0); }}
+                onProgress={setExportProgress}
+                onExportComplete={() => { setIsExporting(false); setExportProgress(100); }}
              />
+             
+             {/* Export Progress Overlay */}
+             {isExporting && (
+                <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 rounded-[2rem] flex flex-col items-center justify-center text-center p-6">
+                    <div className="w-16 h-16 border-4 border-slate-700 border-t-cyan-500 rounded-full animate-spin mb-4"></div>
+                    <h3 className="text-xl font-bold text-white mb-2">Đang xuất video...</h3>
+                    <p className="text-cyan-400 font-mono text-2xl">{exportProgress}%</p>
+                    <p className="text-xs text-slate-400 mt-2 max-w-[200px]">Vui lòng không đóng trình duyệt. Quá trình sẽ diễn ra theo thời gian thực.</p>
+                </div>
+             )}
           </div>
           
-          {/* Helper Hint */}
-          <div className="absolute bottom-6 text-slate-500 text-xs font-medium uppercase tracking-widest opacity-50 pointer-events-none">
-             Xem trước dọc 9:16
+          {/* Action Buttons Row */}
+          <div className="flex gap-4 z-20">
+             <button 
+                onClick={handleSmartCropClick}
+                className="flex items-center gap-2 px-6 py-3 rounded-full bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 transition-all font-medium"
+             >
+                <Crop size={18} />
+                <span>Cắt thông minh</span>
+             </button>
+
+             <button 
+                onClick={handleDownloadClick}
+                disabled={!videoState.url || isExporting}
+                className={`
+                  flex items-center gap-2 px-6 py-3 rounded-full font-bold shadow-lg transition-all
+                  ${!videoState.url || isExporting 
+                    ? 'bg-slate-800 text-slate-500 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white hover:shadow-cyan-500/25 hover:scale-105'}
+                `}
+             >
+                <Download size={18} />
+                <span>{isExporting ? 'Đang xử lý...' : 'Tải Video Về'}</span>
+             </button>
           </div>
+
         </div>
 
       </main>

@@ -23,3 +23,7 @@ export interface OverlayConfig {
   isVisible: boolean;
   positionY: number; // 0 to 100 percentage
 }
+
+export interface VideoPlayerRef {
+  exportVideo: () => Promise<void>;
+}
